@@ -5,38 +5,37 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.SocketException;
+import java.net.*;
+import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Objects;
 
 public class Server
 {
     DatagramSocket socket;
+    private InetAddress address;
 
-    Server() throws SocketException {
-        socket = new DatagramSocket(1234);
+    Server() throws SocketException, UnknownHostException {
+        socket = new DatagramSocket(1234); // Listens on 1234
+        address = InetAddress.getByName("localhost");
     }
 
     public void receive() throws IOException {
-        while (true)
+        byte[] text = new byte[256];
+
+        DatagramPacket packet = new DatagramPacket(text, text.length);
+
+        socket.receive(packet);
+
+        String received = "";
+        received = new String(packet.getData(), 0, packet.getLength());
+
+        if (received.length() > 0)
         {
-            byte[] text = new byte[256];
-
-            DatagramPacket packet = new DatagramPacket(text, text.length);
-
-            socket.receive(packet);
-
-            String received = "";
-            received = new String(packet.getData(), 0, packet.getLength());
-
-            if (received.length() > 0)
-            {
-                System.out.println("Received: " + received);
-                String[] parts = received.split(" ");
-                if (Objects.equals(parts[0], "GET"))
-                    get(parts[1]);
-            }
+            System.out.println("Received: " + received);
+            String[] parts = received.split(" ");
+            if (Objects.equals(parts[0], "GET"))
+                get(parts[1]);
         }
     }
 
@@ -44,64 +43,58 @@ public class Server
     {
         System.out.println("Getting " + text);
         splitImage(text);
-        send();
     }
 
     private void splitImage(String name)
     {
-        File file = null;
-        BufferedImage image = null;
+        File fi = new File("../media/foto1.png");
+        byte[] fileContent;
         try {
-            file = new File("../media/" + name); // I have bear.jpg in my working directory
-            FileInputStream fis = new FileInputStream(file);
-            image = ImageIO.read(fis); //reading the image file
-        } catch (FileNotFoundException e) {
-            System.err.println("File not found: " + e.getMessage());
+            fileContent = Files.readAllBytes(fi.toPath());
         } catch (IOException e) {
-            System.err.println("I/O error: " + e.getMessage());
+            throw new RuntimeException(e);
         }
+        int length = fileContent.length;
+        System.out.println("Length: " + length);
+        int datagramSize = 1400;
+        int i = 0, j = datagramSize;
+        int steps = (int) Math.ceil((double) length / 1400);
 
-        int imagesAmount = Math.toIntExact(file.length() / 1400);
+        byte[] dataToSend = null;
 
-        System.out.println("Divisons: " + ++imagesAmount);
+        for (int k = 0; k < 1; k++)
+        {
+            dataToSend = Arrays.copyOfRange(fileContent, i, j);
 
-        int rows = (int) Math.ceil(Math.sqrt(imagesAmount)); //You should decide the values for rows and cols variables
-        int cols = rows;
-        int chunks = rows * cols;
+            send(dataToSend);
 
-        int chunkWidth = image.getWidth() / cols; // determines the chunk width and height
-        int chunkHeight = image.getHeight() / rows;
-        int count = 0;
-        BufferedImage imgs[] = new BufferedImage[chunks]; //Image array to hold image chunks
-        for (int x = 0; x < rows; x++) {
-            for (int y = 0; y < cols; y++) {
-                //Initialize the image array with image chunks
-                imgs[count] = new BufferedImage(chunkWidth, chunkHeight, image.getType());
-
-                // draws the image chunk
-                Graphics2D gr = imgs[count++].createGraphics();
-                gr.drawImage(image, 0, 0, chunkWidth, chunkHeight, chunkWidth * y, chunkHeight * x, chunkWidth * y + chunkWidth, chunkHeight * x + chunkHeight, null);
-                gr.dispose();
-            }
+            i = j;
+            j += datagramSize;
+            if (j > fileContent.length)
+                j = fileContent.length;
         }
-        System.out.println("Splitting done");
-
-        //writing mini images into image files
-        for (int i = 0; i < imgs.length; i++) {
-            try {
-                ImageIO.write(imgs[i], "jpg", new File("../media/split/img" + i + ".jpg"));
-            } catch (IOException e) {
-                System.err.println("Runtime Exception: " + e.getMessage());
-            }
-        }
-        System.out.println("Mini images created");
     }
 
-//    private void send()
-//    {
-//        DatagramPacket packet = new DatagramPacket()
-//    }
-//
+    private void send(byte[] dataToSend)
+    {
+//        int i = 0;
+//        File file = new File("../media/split/img" + i + ".jpg");
+//        byte[] fileData = new byte[(int) file.length()];
+//        try (FileInputStream fis = new FileInputStream(file)) {
+//            fis.read(fileData);
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+        DatagramPacket packet = new DatagramPacket(dataToSend, dataToSend.length, address, 1235);
+
+        try {
+            socket.send(packet);
+//            System.out.println("Packet sent: id ");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 
     public static void main(String[] args) throws IOException {
         Server server = new Server();
