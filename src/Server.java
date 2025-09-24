@@ -7,6 +7,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.*;
 import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
@@ -49,6 +51,7 @@ public class Server
     private void get(String text)
     {
         System.out.println("Getting " + text);
+        packages = new ArrayList<byte[]>();
         splitImage(text);
     }
 
@@ -65,35 +68,60 @@ public class Server
         }
     }
 
-    private void splitImage(String name)
-    {
-        File fi = new File("../media/foto1.png");
+    private byte[] createHash(byte[] fileContent) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(fileContent);
+            return hash;
+        } catch (NoSuchAlgorithmException e) {
+        }
+        return null;
+    }
+
+    private void splitImage(String name) {
+        File fi = new File("../media/" + name);
+
+        if (!fi.isFile())
+        {
+            sendErrorMessage("File '" + name + "' not found");
+            System.out.println("Sending message is not file");
+            return;
+        }
         byte[] fileContent;
         try {
             fileContent = Files.readAllBytes(fi.toPath());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
         int length = fileContent.length;
         System.out.println("Length: " + length);
-        int datagramSize = 1395;
+        int datagramSize = 1394;
         int i = 0, j = datagramSize;
         int steps = (int) Math.ceil((double) length / datagramSize);
 
         byte[] id = new byte[2];
+
+        byte[] fileContent2 = new byte[steps * datagramSize];
+        for (int k = 0; k < fileContent.length; k++)
+            fileContent2[k] = fileContent[k];
+        // fileContent2 = fileContent com os zeros adicionais
+
+        byte[] hash = createHash(fileContent2);
 
         for (int k = 0; k < steps; k++)
         {
             byte[] dataToSend = new byte[1400];
             byte[] data = Arrays.copyOfRange(fileContent, i, j);
 
-            for (int l = 5; l < data.length + 5; l++)
-                dataToSend[l] = data[l-5];
+            for (int l = 6; l < data.length + 6; l++)
+                dataToSend[l] = data[l-6];
 
             // Header pt0: type of message
             dataToSend[0] = (byte) 0;
                 // 0 = sending data
                 // 1 = message end
+                // 2 = error
 
             // Header pt1: packet ID
             dataToSend[1] = id[0];
@@ -103,8 +131,18 @@ public class Server
             dataToSend[3] = (byte) ( steps / 127 );
             dataToSend[4] = (byte) ( steps % 127 );
 
+            int total = 0;
+            for (byte b : data)
+            {
+                total += b;
+            }
+            dataToSend[5] = (byte) ( total % 127 );
+            // checksum
+
             packages.add(dataToSend);
-            send(dataToSend);
+
+            if (k % 10 != 0)
+                send(dataToSend);
 
             // update Values
             i = j;
@@ -121,6 +159,17 @@ public class Server
             }
 
         }
+
+        byte[] dataToSend = new byte[1400];
+        dataToSend[0] = 1;
+        System.out.println("Hash length: " + hash.length);
+        for(int i2 = 0; i2 < hash.length; i2++)
+        {
+            dataToSend[i2+1] = hash[i2];
+        }
+
+        send(dataToSend);
+
     }
 
     private void sendEndMessage()
@@ -133,10 +182,36 @@ public class Server
 
     private void send(byte[] dataToSend)
     {
+
         DatagramPacket packet = new DatagramPacket(dataToSend, dataToSend.length, address, 1235);
 
         System.out.println("Sending sent: id " + ( dataToSend[1] * 127 + dataToSend[2] ));
 
+        try {
+            socket.send(packet);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        try {
+            Thread.sleep(1);
+        } catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendErrorMessage(String message)
+    {
+        byte[] bytesMessage = message.getBytes();
+        byte[] bytesTotal = new byte[message.getBytes().length + 1];
+        bytesTotal[0] = (byte) 2;
+        for (int i = 1; i < bytesTotal.length; i++)
+        {
+            bytesTotal[i] = bytesMessage[i-1];
+        }
+
+        DatagramPacket packet = new DatagramPacket(bytesTotal, bytesTotal.length, address, 1235);
+        
         try {
             socket.send(packet);
         } catch (IOException e) {
